@@ -24,6 +24,45 @@ type emo_code struct {
 	Errmessage string `json:"errmessage"`
 }
 
+// --- Support for QueryResponse override logic ---
+
+type Intent struct {
+	Name       string  `json:"name"`
+	Confidence float64 `json:"confidence"`
+}
+
+// BehaviorParas supports both flat and nested structures.
+type BehaviorParas struct {
+	UtilityType   string         `json:"utility_type,omitempty"`
+	Time          []string       `json:"time,omitempty"`
+	Txt           string         `json:"txt,omitempty"`
+	Url           string         `json:"url,omitempty"`
+	PreAnimation  string         `json:"pre_animation,omitempty"`
+	PostAnimation string         `json:"post_animation,omitempty"`
+	PostBehavior  string         `json:"post_behavior,omitempty"`
+	RecBehavior   string         `json:"rec_behavior,omitempty"`
+	BehaviorParas *BehaviorParas `json:"behavior_paras,omitempty"`
+	Sentiment     string         `json:"sentiment,omitempty"`
+	Listen        int            `json:"listen,omitempty"`
+}
+
+type QueryResult struct {
+	ResultCode    string        `json:"resultCode"`
+	QueryText     string        `json:"queryText"`
+	Intent        Intent        `json:"intent"`
+	RecBehavior   string        `json:"rec_behavior"`
+	BehaviorParas BehaviorParas `json:"behavior_paras"`
+}
+
+type QueryResponse struct {
+	QueryId      string      `json:"queryId"`
+	QueryResult  QueryResult `json:"queryResult"`
+	LanguageCode string      `json:"languageCode"`
+	Index        int         `json:"index"`
+}
+
+// --- End support for QueryResponse override logic ---
+
 type Configuration struct {
 	PidFile                 string `json:"pidFile"`
 	Livingio_API_Server     string `json:"livingio_api_server"`
@@ -190,6 +229,41 @@ func main() {
 			}
 			json.NewEncoder(w).Encode(requests)
 		})
+		// POST /proxy-api/overrides - add new override
+		http.HandleFunc("/proxy-api/override", func(w http.ResponseWriter, r *http.Request) {
+			logRequest(r)
+			if r.Method != http.MethodPost {
+				http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+				return
+			}
+			var override map[string]interface{}
+			fmt.Println("override body ", r.Body)
+			if err := json.NewDecoder(r.Body).Decode(&override); err != nil {
+				http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+				return
+			}
+
+			if err := saveOverride(override["endpointLookup"].(string), override["payloadLookup"].(string), override["responseLookup"].(string), override["responseOverride"].(string)); err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"status": "override added"})
+		})
+
+		http.HandleFunc("/proxy-api/overrides", func(w http.ResponseWriter, r *http.Request) {
+			logRequest(r)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+
+			requests, err := getAllOverrides()
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(requests)
+		})
 	}
 
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*Port), corsMiddleware(http.DefaultServeMux)))
@@ -327,6 +401,47 @@ func makeApiRequest(r *http.Request) string {
 	// read response
 	body, _ := io.ReadAll(response.Body)
 	log.Println("Server response: ", string(body))
+	fmt.Println("Server response: ", string(body))
+
+	override, success, error := getOverrideBasedOnResponse(string(body))
+	fmt.Println("override:", override, " success:", success, " error:", error)
+
+	if success {
+		log.Println("Overriding response with: ", override)
+		var typedOverride QueryResponse
+		if err := json.Unmarshal([]byte(override), &typedOverride); err == nil {
+			log.Printf("Typed override: %+v\n", typedOverride)
+		}
+
+		var typedBody QueryResponse
+		if err := json.Unmarshal([]byte(body), &typedBody); err == nil {
+			log.Printf("Typed body: %+v\n", typedBody)
+		}
+
+		// typedBody.QueryResult.RecBehavior = typedOverride.QueryResult.RecBehavior
+		// typedBody.QueryResult.BehaviorParas = typedOverride.QueryResult.BehaviorParas
+		// typedBody.QueryResult.Intent = typedOverride.QueryResult.Intent
+		// typedBody.QueryResult = typedOverride.QueryResult
+
+		typedOverride.QueryId = typedBody.QueryId
+		typedOverride.QueryResult.ResultCode = typedBody.QueryResult.ResultCode
+		typedOverride.Index = typedBody.Index
+
+		fmt.Println("typedBody", typedBody)
+		fmt.Println("typedOverride", typedOverride)
+
+		// overrideBytes, err := json.Marshal(typedBody)
+		overrideBytes, err := json.Marshal(typedOverride)
+		if err != nil {
+			log.Fatalf("An Error Occured during marshaling override %v", err)
+		}
+
+		fmt.Println("string(overrideBytes)", string(overrideBytes))
+
+		// add so that we log which override is used
+		saveRequest(r.URL.RequestURI(), string(requestBody), string(overrideBytes))
+		return string(overrideBytes)
+	}
 
 	logResponse(response)
 
