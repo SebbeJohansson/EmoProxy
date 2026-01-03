@@ -45,6 +45,7 @@ func main() {
 	log.Println("Starting application...")
 	//load config
 	confFile := flag.String("c", "emoProxy.conf", "config file to use")
+	Port := flag.Int("port", 8080, "http port")
 	flag.Parse()
 
 	err := loadConfig(*confFile)
@@ -58,8 +59,6 @@ func main() {
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	// parse flags
-	Port := flag.Int("port", 8080, "http port")
-	flag.Parse()
 	log.Println("Starting app on port: ", *Port)
 
 	// redirect log
