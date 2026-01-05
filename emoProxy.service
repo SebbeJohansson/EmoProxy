@@ -3,7 +3,7 @@
     After=network.target
 
     [Service]
-    ExecStart=/usr/local/bin/emoProxy
+    ExecStart=/usr/local/bin/emoProxy -c /etc/emoProxy.conf
     Type=simple
     WatchdogSec=0s
     Restart=on-failure
