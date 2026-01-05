@@ -33,7 +33,9 @@ type Configuration struct {
 	PostFS                  string `json:"postFS"`
 	LogFileName             string `json:"logFileName"`
 	EnableDatabaseAndAPI    bool   `json:"enableDatabaseAndAPI"`
+	EnableReplacements      bool   `json:"enableReplacements"`
 	SqliteLocation          string `json:"sqliteLocation"`
+	ChatGptSpeakServer      string `json:"chatGptSpeakServer"`
 }
 
 var (
@@ -104,7 +106,9 @@ func loadConfig(filename string) error {
 		PostFS:                  "/tmp/",
 		LogFileName:             "/var/log/emoProxy.log",
 		EnableDatabaseAndAPI:    false,
+		EnableReplacements:      false,
 		SqliteLocation:          "/var/data/emo_logs.db",
+		ChatGptSpeakServer:      "",
 	}
 
 	bytes, err := os.ReadFile(filename)
@@ -317,6 +321,11 @@ func makeApiRequest(r *http.Request) string {
 
 	logResponse(response)
 
+	if conf.EnableReplacements {
+		log.Println("Replacements enabled, checking for replacements...")
+		body = runReplacementsAndReturnModifiedBody(body, r)
+	}
+
 	if useDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), string(requestBody), string(body))
 	}
@@ -346,10 +355,8 @@ func makeTtsRequest(r *http.Request) string {
 	}
 	defer response.Body.Close()
 
-	// read response
 	body, _ := io.ReadAll(response.Body)
 
-	// write post request body to fs
 	logBody(response.Header.Get("Content-Type"), body, "tts_")
 	logResponse(response)
 
@@ -382,10 +389,8 @@ func makeApiTtsRequest(r *http.Request) string {
 	}
 	defer response.Body.Close()
 
-	// read response
 	body, _ := io.ReadAll(response.Body)
 
-	// write post request body to fs
 	logBody(response.Header.Get("Content-Type"), body, "apitts_")
 	logResponse(response)
 
@@ -418,7 +423,6 @@ func makeResRequest(r *http.Request, w http.ResponseWriter) string {
 	}
 	defer response.Body.Close()
 
-	// read response
 	body, _ := io.ReadAll(response.Body)
 
 	logBody(response.Header.Get("Content-Type"), body, "res_")
